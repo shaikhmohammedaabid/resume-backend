@@ -22,6 +22,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# const API_URL = "https://resume-backend-hkeq.onrender.com/"
+# API_KEY = "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"
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class AnalysisResult(BaseModel):
@@ -46,45 +49,35 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
 
 def analyze_with_ai(resume_text: str) -> AnalysisResult:
     prompt = f"""
-You are an expert resume reviewer.
+You are a professional resume reviewer.
 
-Analyze this resume and return a JSON with:
+Analyze this resume and return JSON with:
 - score (0-100)
-- skills: array
-- summary: 2–3 line summary
-- weaknesses: list
-- suggestions: list
-- improvedResume: rewritten resume
+- skills (list)
+- summary
+- weaknesses (list)
+- suggestions (list)
+- improvedResume
 
-Resume text:
+Resume:
 \"\"\"{resume_text}\"\"\"
 """
 
-    response = client.responses.create(
+    response = client.chat.completions.create(
         model="gpt-4.1-mini",
-        input=prompt,
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "resume_analysis",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "score": {"type": "integer"},
-                        "skills": {"type": "array", "items": {"type": "string"}},
-                        "summary": {"type": "string"},
-                        "weaknesses": {"type": "array", "items": {"type": "string"}},
-                        "suggestions": {"type": "array", "items": {"type": "string"}},
-                        "improvedResume": {"type": "string"}
-                    },
-                    "required": ["score", "skills", "summary", "weaknesses", "suggestions", "improvedResume"]
-                }
-            }
-        }
+        messages=[
+            {"role": "system", "content": "You are an expert resume analyzer."},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"}
     )
 
-    data = response.output[0].parsed
+    # Extract JSON safely
+    import json
+    data = json.loads(response.choices[0].message.content)
+
     return AnalysisResult(**data)
+
 
 @app.post("/analyze-resume", response_model=AnalysisResult)
 async def analyze_resume(file: UploadFile = File(...)):
