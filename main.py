@@ -31,6 +31,7 @@ class AnalysisResult(BaseModel):
     skills: list[str]
     summary: str
     weaknesses: list[str]
+    strengths: list[str]       # ⬅ missing
     suggestions: list[str]
     improvedResume: str
 
@@ -54,6 +55,7 @@ Analyze this resume and return JSON with:
 - score (0-100)
 - skills (list)
 - summary
+- strengths (list)  
 - weaknesses (list)
 - suggestions (list)
 - improvedResume
