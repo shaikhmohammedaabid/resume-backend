@@ -22,9 +22,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# const API_URL = "https://resume-backend-hkeq.onrender.com/"
-# API_KEY = "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"
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class AnalysisResult(BaseModel):
