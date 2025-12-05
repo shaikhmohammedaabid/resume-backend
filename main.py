@@ -9,14 +9,16 @@ from openai import OpenAI
 
 app = FastAPI()
 
+# FIXED CORS
 origins = [
+    "http://localhost:8080",        # Vite dev server
     "http://localhost:5173",
-    "https://resumexai.netlify.app",
+    "https://resumexai.netlify.app"
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins,   
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,7 +71,6 @@ Resume:
         response_format={"type": "json_object"}
     )
 
-    # Extract JSON safely
     import json
     data = json.loads(response.choices[0].message.content)
 
