@@ -149,143 +149,219 @@ async def analyze_resume(file: UploadFile = File(...)):
 
 @app.post("/download-report")
 async def download_report(data: AnalysisResult):
-    """
-    Generates a premium PDF report with elegant formatting.
-    """
 
     buffer = io.BytesIO()
 
-    # PREMIUM PAGE SETTINGS
+    # Document settings + custom margins
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
-        rightMargin=40,
-        leftMargin=40,
-        topMargin=60,
-        bottomMargin=40,
+        leftMargin=45,
+        rightMargin=45,
+        topMargin=70,
+        bottomMargin=50
     )
 
     styles = getSampleStyleSheet()
-    title_style = styles["Title"]
-    title_style.fontSize = 26
-    title_style.textColor = "#C9A227"  # Gold color
-    title_style.leading = 32
 
-    heading_style = styles["Heading2"]
-    heading_style.fontSize = 18
-    heading_style.textColor = "#333333"
+    # -----------------------------
+    #    CUSTOM ULTRA PREMIUM STYLES
+    # -----------------------------
 
-    subheading_style = styles["Heading3"]
-    subheading_style.fontSize = 14
-    subheading_style.textColor = "#555555"
+    title_style = ParagraphStyle(
+        "title_style",
+        parent=styles["Title"],
+        fontSize=28,
+        leading=34,
+        textColor="#C9A227",
+        alignment=1,  # center
+    )
 
-    body = styles["BodyText"]
-    body.fontName = "Helvetica"
-    body.fontSize = 11
-    body.leading = 14
+    header_style = ParagraphStyle(
+        "header_style",
+        parent=styles["Heading2"],
+        fontSize=18,
+        leading=22,
+        textColor="#2E2E2E",
+    )
 
-    bullet_style = styles["Bullet"]
-    bullet_style.fontSize = 11
-    bullet_style.leading = 14
+    subheader_style = ParagraphStyle(
+        "subheader_style",
+        parent=styles["Heading3"],
+        fontSize=14,
+        leading=18,
+        textColor="#444",
+    )
+
+    body_style = ParagraphStyle(
+        "body_style",
+        parent=styles["BodyText"],
+        fontSize=11.5,
+        leading=16,
+        textColor="#333",
+    )
+
+    bullet_style = ParagraphStyle(
+        "bullet_style",
+        parent=styles["BodyText"],
+        fontSize=11.5,
+        leading=16,
+        leftIndent=15
+    )
+
+    highlight_box_style = ParagraphStyle(
+        "highlight",
+        parent=styles["BodyText"],
+        backColor="#FFF8E1",
+        borderColor="#C9A227",
+        borderWidth=1,
+        borderPadding=8,
+        fontSize=12,
+        leading=18,
+        spaceAfter=12,
+    )
+
+    # -----------------------------
+    # PAGE HEADER + TITLE
+    # -----------------------------
 
     elements = []
 
-    # -------------------------
-    # TITLE SECTION
-    # -------------------------
-    elements.append(Paragraph("<b>Resume Analysis Report</b>", title_style))
+    elements.append(Paragraph("Resume Analysis Report", title_style))
+    elements.append(Spacer(1, 0.35 * inch))
+
+    # -----------------------------
+    # LARGE SCORE PANEL
+    # -----------------------------
+
+    score_panel = [
+        [Paragraph(f"<b>Your Resume Score: {data.score}/100</b>", header_style)]
+    ]
+
+    table = Table(
+        score_panel,
+        colWidths=[6.2 * inch]
+    )
+
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.Color(0.95, 0.88, 0.55)),
+        ("BOX", (0, 0), (-1, -1), 2, colors.Color(0.8, 0.65, 0.15)),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 12),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+    ]))
+
+    elements.append(table)
     elements.append(Spacer(1, 0.3 * inch))
 
-    # -------------------------
-    # SCORE SECTION BOX
-    # -------------------------
-    score_box = f"""
-    <para alignment="center">
-        <font size="18" color="#C9A227"><b>Resume Score: {data.score}/100</b></font><br/>
-        <font size="12">A higher score means your resume is more job-ready.</font>
-    </para>
-    """
-
-    elements.append(Paragraph(score_box, body))
-    elements.append(Spacer(1, 0.3 * inch))
-
-    # Divider Line
-    elements.append(Paragraph("<para><font color='#C9A227'>────────────────────────────────────────────</font></para>", body))
+    # Divider
+    elements.append(Paragraph("<para alignment='center'><font color='#C9A227'>────────────────────────────────────────</font></para>", body_style))
     elements.append(Spacer(1, 0.2 * inch))
 
-    # -------------------------
-    # SUMMARY
-    # -------------------------
-    elements.append(Paragraph("<b>Professional Summary</b>", heading_style))
+    # -----------------------------
+    # SUMMARY BLOCK
+    # -----------------------------
+    elements.append(Paragraph("Professional Summary", header_style))
     elements.append(Spacer(1, 0.1 * inch))
-    elements.append(Paragraph(data.summary.replace("\n", "<br/>"), body))
+    elements.append(Paragraph(data.summary.replace("\n", "<br/>"), body_style))
     elements.append(Spacer(1, 0.25 * inch))
 
-    # -------------------------
-    # STRENGTHS
-    # -------------------------
+    # -----------------------------
+    # STRENGTHS (in gold box)
+    # -----------------------------
     if data.strengths:
-        elements.append(Paragraph("<b>Key Strengths</b>", heading_style))
-        elements.append(Spacer(1, 0.1 * inch))
+        elements.append(Paragraph("Key Strengths", header_style))
+        elements.append(Spacer(1, 0.15 * inch))
+
         for s in data.strengths:
             elements.append(Paragraph(f"• {s}", bullet_style))
-        elements.append(Spacer(1, 0.25 * inch))
 
-    # -------------------------
-    # WEAKNESSES
-    # -------------------------
-    elements.append(Paragraph("<b>Areas for Improvement</b>", heading_style))
-    elements.append(Spacer(1, 0.1 * inch))
+        elements.append(Spacer(1, 0.3 * inch))
+
+    # -----------------------------
+    # WEAKNESSES (in red box)
+    # -----------------------------
+    elements.append(Paragraph("Areas for Improvement", header_style))
+    elements.append(Spacer(1, 0.15 * inch))
+
     for w in data.weaknesses:
         elements.append(Paragraph(f"• {w}", bullet_style))
-    elements.append(Spacer(1, 0.25 * inch))
 
-    # -------------------------
-    # SKILLS
-    # -------------------------
-    elements.append(Paragraph("<b>Detected Skills</b>", heading_style))
-    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Spacer(1, 0.3 * inch))
 
-    for skill in data.skills:
-        elements.append(Paragraph(f"• {skill}", bullet_style))
-    elements.append(Spacer(1, 0.25 * inch))
+    # -----------------------------
+    # SKILLS – Skill Badge Table
+    # -----------------------------
+    elements.append(Paragraph("Detected Skills", header_style))
+    elements.append(Spacer(1, 0.15 * inch))
 
-    # -------------------------
+    skill_rows = []
+    row = []
+
+    for i, skill in enumerate(data.skills):
+        badge = Paragraph(
+            f"<para alignment='center'><b>{skill}</b></para>",
+            ParagraphStyle(
+                "badge",
+                backColor="#EFEFEF",
+                borderColor="#C9A227",
+                borderWidth=1,
+                borderRadius=5,
+                alignment=1,
+                padding=4,
+                leading=14,
+            )
+        )
+        row.append(badge)
+
+        if len(row) == 3:
+            skill_rows.append(row)
+            row = []
+
+    if row:
+        skill_rows.append(row)
+
+    skill_table = Table(skill_rows, colWidths=[2 * inch])
+    skill_table.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+    elements.append(skill_table)
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # -----------------------------
     # SUGGESTIONS
-    # -------------------------
-    elements.append(Paragraph("<b>Suggestions</b>", heading_style))
-    elements.append(Spacer(1, 0.1 * inch))
+    # -----------------------------
+    elements.append(Paragraph("Suggestions for Improvement", header_style))
+    elements.append(Spacer(1, 0.15 * inch))
 
     for s in data.suggestions:
         elements.append(Paragraph(f"• {s}", bullet_style))
-    elements.append(Spacer(1, 0.25 * inch))
 
-    # Divider Line
-    elements.append(Paragraph("<para><font color='#C9A227'>────────────────────────────────────────────</font></para>", body))
-    elements.append(Spacer(1, 0.25 * inch))
+    elements.append(Spacer(1, 0.4 * inch))
 
-    # -------------------------
-    # IMPROVED RESUME SECTION
-    # -------------------------
-    elements.append(Paragraph("<b>AI-Improved Resume</b>", heading_style))
-    elements.append(Spacer(1, 0.2 * inch))
+    # New Page for Improved Resume
+    elements.append(PageBreak())
 
-    improved = data.improvedResume.replace("\n", "<br/>")
-    elements.append(Paragraph(improved, body))
+    # -----------------------------
+    # IMPROVED RESUME (premium layout)
+    # -----------------------------
+    elements.append(Paragraph("AI-Optimized Resume", title_style))
+    elements.append(Spacer(1, 0.3 * inch))
 
-    # -------------------------
-    # BUILD PDF
-    # -------------------------
+    improved_resume_text = data.improvedResume.replace("\n", "<br/>")
+    elements.append(Paragraph(improved_resume_text, body_style))
+
+    # -----------------------------
+    # BUILD DOCUMENT
+    # -----------------------------
     doc.build(elements)
+
     buffer.seek(0)
 
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=Resume_Analysis_Report.pdf"},
+        headers={"Content-Disposition": "attachment; filename=UltraPremium_Resume_Report.pdf"},
     )
-
-
 
 # ---------------------------
 # ROOT ROUTE
