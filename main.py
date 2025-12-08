@@ -12,6 +12,12 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.units import inch
 from openai import OpenAI
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from fastapi.responses import StreamingResponse
 
 
 # ---------------------------
@@ -144,65 +150,141 @@ async def analyze_resume(file: UploadFile = File(...)):
 @app.post("/download-report")
 async def download_report(data: AnalysisResult):
     """
-    Generates a PDF from the resume analysis.
+    Generates a premium PDF report with elegant formatting.
     """
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+
+    # PREMIUM PAGE SETTINGS
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=60,
+        bottomMargin=40,
+    )
+
     styles = getSampleStyleSheet()
+    title_style = styles["Title"]
+    title_style.fontSize = 26
+    title_style.textColor = "#C9A227"  # Gold color
+    title_style.leading = 32
+
+    heading_style = styles["Heading2"]
+    heading_style.fontSize = 18
+    heading_style.textColor = "#333333"
+
+    subheading_style = styles["Heading3"]
+    subheading_style.fontSize = 14
+    subheading_style.textColor = "#555555"
+
+    body = styles["BodyText"]
+    body.fontName = "Helvetica"
+    body.fontSize = 11
+    body.leading = 14
+
+    bullet_style = styles["Bullet"]
+    bullet_style.fontSize = 11
+    bullet_style.leading = 14
 
     elements = []
 
-    # Title
-    elements.append(Paragraph("<b>Resume Analysis Report</b>", styles["Title"]))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Score
-    elements.append(Paragraph(f"<b>Score:</b> {data.score}/100", styles["Heading2"]))
-    elements.append(Spacer(1, 0.1 * inch))
-
-    # Summary
-    elements.append(Paragraph("<b>Summary</b>", styles["Heading3"]))
-    elements.append(Paragraph(data.summary, styles["BodyText"]))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Strengths
-    if data.strengths:
-        elements.append(Paragraph("<b>Strengths</b>", styles["Heading3"]))
-        for s in data.strengths:
-            elements.append(Paragraph(f"• {s}", styles["BodyText"]))
-        elements.append(Spacer(1, 0.2 * inch))
-
-    # Weaknesses
-    elements.append(Paragraph("<b>Weaknesses</b>", styles["Heading3"]))
-    for w in data.weaknesses:
-        elements.append(Paragraph(f"• {w}", styles["BodyText"]))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Skills
-    elements.append(Paragraph("<b>Skills</b>", styles["Heading3"]))
-    for skill in data.skills:
-        elements.append(Paragraph(f"• {skill}", styles["BodyText"]))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # Suggestions
-    elements.append(Paragraph("<b>Suggestions</b>", styles["Heading3"]))
-    for sug in data.suggestions:
-        elements.append(Paragraph(f"• {sug}", styles["BodyText"]))
+    # -------------------------
+    # TITLE SECTION
+    # -------------------------
+    elements.append(Paragraph("<b>Resume Analysis Report</b>", title_style))
     elements.append(Spacer(1, 0.3 * inch))
 
-    # Improved Resume
-    elements.append(Paragraph("<b>Improved Resume</b>", styles["Heading3"]))
-    elements.append(Paragraph(data.improvedResume.replace("\n", "<br/>"), styles["BodyText"]))
+    # -------------------------
+    # SCORE SECTION BOX
+    # -------------------------
+    score_box = f"""
+    <para alignment="center">
+        <font size="18" color="#C9A227"><b>Resume Score: {data.score}/100</b></font><br/>
+        <font size="12">A higher score means your resume is more job-ready.</font>
+    </para>
+    """
 
+    elements.append(Paragraph(score_box, body))
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # Divider Line
+    elements.append(Paragraph("<para><font color='#C9A227'>────────────────────────────────────────────</font></para>", body))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # -------------------------
+    # SUMMARY
+    # -------------------------
+    elements.append(Paragraph("<b>Professional Summary</b>", heading_style))
+    elements.append(Spacer(1, 0.1 * inch))
+    elements.append(Paragraph(data.summary.replace("\n", "<br/>"), body))
+    elements.append(Spacer(1, 0.25 * inch))
+
+    # -------------------------
+    # STRENGTHS
+    # -------------------------
+    if data.strengths:
+        elements.append(Paragraph("<b>Key Strengths</b>", heading_style))
+        elements.append(Spacer(1, 0.1 * inch))
+        for s in data.strengths:
+            elements.append(Paragraph(f"• {s}", bullet_style))
+        elements.append(Spacer(1, 0.25 * inch))
+
+    # -------------------------
+    # WEAKNESSES
+    # -------------------------
+    elements.append(Paragraph("<b>Areas for Improvement</b>", heading_style))
+    elements.append(Spacer(1, 0.1 * inch))
+    for w in data.weaknesses:
+        elements.append(Paragraph(f"• {w}", bullet_style))
+    elements.append(Spacer(1, 0.25 * inch))
+
+    # -------------------------
+    # SKILLS
+    # -------------------------
+    elements.append(Paragraph("<b>Detected Skills</b>", heading_style))
+    elements.append(Spacer(1, 0.1 * inch))
+
+    for skill in data.skills:
+        elements.append(Paragraph(f"• {skill}", bullet_style))
+    elements.append(Spacer(1, 0.25 * inch))
+
+    # -------------------------
+    # SUGGESTIONS
+    # -------------------------
+    elements.append(Paragraph("<b>Suggestions</b>", heading_style))
+    elements.append(Spacer(1, 0.1 * inch))
+
+    for s in data.suggestions:
+        elements.append(Paragraph(f"• {s}", bullet_style))
+    elements.append(Spacer(1, 0.25 * inch))
+
+    # Divider Line
+    elements.append(Paragraph("<para><font color='#C9A227'>────────────────────────────────────────────</font></para>", body))
+    elements.append(Spacer(1, 0.25 * inch))
+
+    # -------------------------
+    # IMPROVED RESUME SECTION
+    # -------------------------
+    elements.append(Paragraph("<b>AI-Improved Resume</b>", heading_style))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    improved = data.improvedResume.replace("\n", "<br/>")
+    elements.append(Paragraph(improved, body))
+
+    # -------------------------
+    # BUILD PDF
+    # -------------------------
     doc.build(elements)
     buffer.seek(0)
 
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=resume_report.pdf"},
+        headers={"Content-Disposition": "attachment; filename=Resume_Analysis_Report.pdf"},
     )
+
 
 
 # ---------------------------
