@@ -7,20 +7,20 @@ import docx
 import io
 import os
 import json
-from openai import OpenAI
-
-# ReportLab (PDF)
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-)
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+import requests
+from dotenv import load_dotenv
 
+load_dotenv()
+
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 # ---------------------------------------------------
-# FASTAPI SETUP
+# FASTAPI APP
 # ---------------------------------------------------
 
 app = FastAPI()
@@ -41,36 +41,28 @@ app.add_middleware(
 
 
 # ---------------------------------------------------
-# OPENAI CLIENT
-# ---------------------------------------------------
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-
-# ---------------------------------------------------
-# RESPONSE MODEL
+# Pydantic Model
 # ---------------------------------------------------
 
 class AnalysisResult(BaseModel):
     score: int
     skills: list[str]
     summary: str
+    strengths: list[str]
     weaknesses: list[str]
     suggestions: list[str]
     improvedResume: str
-    strengths: list[str] = []
-    sections: list = []
 
 
 # ---------------------------------------------------
-# PDF / DOCX EXTRACTION
+# File Extraction
 # ---------------------------------------------------
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     text = ""
     for page in doc:
-        text += page.get_text("text")  # Faster + cleaner
+        text += page.get_text()
     return text
 
 
@@ -81,87 +73,78 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
 
 
 # ---------------------------------------------------
-# ⚡ 2-STEP OPTIMIZED AI ANALYSIS (SUPER FAST)
+# DeepSeek AI ANALYSIS
 # ---------------------------------------------------
 
-def analyze_with_ai(resume_text: str) -> AnalysisResult:
-    # --------------------------
-    # STEP 1 — Fast Summarization
-    # --------------------------
-    summary_prompt = f"""
-Summarize this resume into clean structured points.
-Keep it short but meaningful.
+def analyze_with_deepseek(text: str) -> AnalysisResult:
+    url = "https://api.deepseek.com/chat/completions"
 
-Resume:
-\"\"\"{resume_text}\"\"\"
-"""
-
-    summary_response = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[
-            {"role": "system", "content": "You are an expert summarizer."},
-            {"role": "user", "content": summary_prompt},
-        ]
-    )
-
-    short_resume = summary_response.choices[0].message.content
-
-    # --------------------------
-    # STEP 2 — Actual Analysis (10× faster now)
-    # --------------------------
-    analysis_prompt = f"""
+    prompt = f"""
 You are a professional resume reviewer.
+Analyze the resume below and return a STRICT JSON object with EXACT keys:
 
-Analyze this summarized resume and return STRICT JSON with:
-- score (0-100)
-- skills
-- summary
-- strengths
-- weaknesses
-- suggestions
-- improvedResume
+score: number 0-100
+skills: list of strings
+summary: string
+strengths: list of strings
+weaknesses: list of strings
+suggestions: list of strings
+improvedResume: string
 
-Summarized Resume:
-\"\"\"{short_resume}\"\"\"
+Resume Text:
+\"\"\"{text}\"\"\"
 """
 
-    final_response = client.chat.completions.create(
-        model="gpt-4.1",
-        messages=[
-            {"role": "system", "content": "You are an expert resume analyzer."},
-            {"role": "user", "content": analysis_prompt},
-        ],
-        response_format={"type": "json_object"}
-    )
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
 
-    data = json.loads(final_response.choices[0].message.content)
-    return AnalysisResult(**data)
+    payload = {
+        "model": "deepseek-chat",
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": "You are an expert ATS resume analyzer."},
+            {"role": "user", "content": prompt},
+        ]
+    }
+
+    response = requests.post(url, headers=headers, json=payload, timeout=200)
+    data = response.json()
+
+    if "choices" not in data:
+        raise Exception("DeepSeek Error: " + str(data))
+
+    content = data["choices"][0]["message"]["content"]
+    parsed = json.loads(content)
+
+    return AnalysisResult(**parsed)
 
 
 # ---------------------------------------------------
-# API — Analyze Resume
+# API: Upload & Analyze
 # ---------------------------------------------------
 
 @app.post("/analyze-resume", response_model=AnalysisResult)
 async def analyze_resume(file: UploadFile = File(...)):
     file_bytes = await file.read()
-    fname = file.filename.lower()
+    name = file.filename.lower()
 
-    if fname.endswith(".pdf"):
+    if name.endswith(".pdf"):
         resume_text = extract_text_from_pdf(file_bytes)
-    elif fname.endswith(".docx"):
+    elif name.endswith(".docx"):
         resume_text = extract_text_from_docx(file_bytes)
     else:
-        return {"error": "Only PDF or DOCX files supported"}
+        return {"error": "Only PDF or DOCX accepted"}
 
     if not resume_text.strip():
         return {"error": "Could not extract text"}
 
-    return analyze_with_ai(resume_text)
+    return analyze_with_deepseek(resume_text)
 
 
 # ---------------------------------------------------
-# API — Download Premium PDF
+# API: ULTRA PREMIUM PDF REPORT
 # ---------------------------------------------------
 
 @app.post("/download-report")
@@ -174,88 +157,86 @@ async def download_report(data: AnalysisResult):
         pagesize=letter,
         leftMargin=45,
         rightMargin=45,
-        topMargin=70,
-        bottomMargin=50,
+        topMargin=60,
+        bottomMargin=40,
     )
 
     styles = getSampleStyleSheet()
 
-    # Premium Styles
     title_style = ParagraphStyle(
-        "title_style",
+        "title",
         parent=styles["Title"],
         fontSize=26,
         leading=32,
-        textColor="#C9A227",
         alignment=1,
+        textColor="#C9A227",
     )
 
     header_style = ParagraphStyle(
-        "header_style",
+        "header",
         parent=styles["Heading2"],
-        fontSize=18,
+        fontSize=17,
+        leading=22,
         textColor="#2E2E2E",
     )
 
     body_style = ParagraphStyle(
-        "body_style",
+        "body",
         parent=styles["BodyText"],
-        fontSize=12,
+        fontSize=11.5,
         leading=16,
         textColor="#333",
     )
 
     bullet_style = ParagraphStyle(
-        "bullet_style",
+        "bullet",
         parent=styles["BodyText"],
-        fontSize=12,
-        leading=16,
+        fontSize=11.5,
         leftIndent=15,
+        leading=16,
     )
 
-    # PDF BODY
     elements = []
 
+    # Title
     elements.append(Paragraph("Resume Analysis Report", title_style))
-    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Spacer(1, 0.4 * inch))
 
-    # Score Panel
-    score_panel = [
-        [Paragraph(f"<b>Resume Score: {data.score}/100</b>", header_style)]
-    ]
+    # Score Box
+    table = Table(
+        [[Paragraph(f"<b>Resume Score: {data.score}/100</b>", header_style)]],
+        colWidths=[6.2 * inch]
+    )
 
-    table = Table(score_panel, colWidths=[6 * inch])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.Color(0.95, 0.88, 0.55)),
         ("BOX", (0, 0), (-1, -1), 2, colors.Color(0.8, 0.65, 0.15)),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 12),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
     ]))
 
     elements.append(table)
-    elements.append(Spacer(1, 0.25 * inch))
+    elements.append(Spacer(1, 0.3 * inch))
 
     # Summary
     elements.append(Paragraph("Professional Summary", header_style))
-    elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph(data.summary.replace("\n", "<br/>"), body_style))
-    elements.append(Spacer(1, 0.25 * inch))
+    elements.append(Spacer(1, 0.3 * inch))
 
     # Strengths
-    if data.strengths:
-        elements.append(Paragraph("Key Strengths", header_style))
-        for s in data.strengths:
-            elements.append(Paragraph(f"• {s}", bullet_style))
-        elements.append(Spacer(1, 0.25 * inch))
+    elements.append(Paragraph("Key Strengths", header_style))
+    for s in data.strengths:
+        elements.append(Paragraph(f"• {s}", bullet_style))
+    elements.append(Spacer(1, 0.3 * inch))
 
     # Weaknesses
     elements.append(Paragraph("Areas to Improve", header_style))
     for w in data.weaknesses:
         elements.append(Paragraph(f"• {w}", bullet_style))
-    elements.append(Spacer(1, 0.25 * inch))
+    elements.append(Spacer(1, 0.3 * inch))
 
-    # Skills List
+    # Skills
     elements.append(Paragraph("Detected Skills", header_style))
     for skill in data.skills:
         elements.append(Paragraph(f"• {skill}", bullet_style))
@@ -265,12 +246,11 @@ async def download_report(data: AnalysisResult):
     elements.append(Paragraph("Suggestions", header_style))
     for sug in data.suggestions:
         elements.append(Paragraph(f"• {sug}", bullet_style))
-    elements.append(Spacer(1, 0.3 * inch))
 
-    # New Page — Improved Resume
     elements.append(PageBreak())
+
+    # Improved Resume Page
     elements.append(Paragraph("AI-Optimized Resume", title_style))
-    elements.append(Spacer(1, 0.3 * inch))
     elements.append(Paragraph(data.improvedResume.replace("\n", "<br/>"), body_style))
 
     doc.build(elements)
@@ -279,14 +259,14 @@ async def download_report(data: AnalysisResult):
     return StreamingResponse(
         buffer,
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=UltraPremium_Resume_Report.pdf"},
+        headers={"Content-Disposition": "attachment; filename=ResumeAI_Premium_Report.pdf"},
     )
 
 
 # ---------------------------------------------------
-# ROOT ROUTE
+# Root
 # ---------------------------------------------------
 
 @app.get("/")
-def home():
-    return {"message": "Resume AI Backend Running Successfully!"}
+def root():
+    return {"message": "DeepSeek Resume AI Backend Running!"}
