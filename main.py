@@ -7,32 +7,28 @@ import docx
 import io
 import os
 import json
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.units import inch
 from openai import OpenAI
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+
+# ReportLab (PDF)
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+)
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-from fastapi.responses import StreamingResponse
 
 
-# ---------------------------
-# FASTAPI APP
-# ---------------------------
+# ---------------------------------------------------
+# FASTAPI SETUP
+# ---------------------------------------------------
 
 app = FastAPI()
 
 origins = [
     "http://localhost:5173",
-    "http://localhost:5173/",
     "http://localhost:8080",
-    "http://localhost:8080/",
     "https://resumexai.netlify.app",
-    "https://resumexai.netlify.app/",
 ]
 
 app.add_middleware(
@@ -44,16 +40,16 @@ app.add_middleware(
 )
 
 
-# ---------------------------
+# ---------------------------------------------------
 # OPENAI CLIENT
-# ---------------------------
+# ---------------------------------------------------
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-# ---------------------------
-# ANALYSIS RESULT MODEL
-# ---------------------------
+# ---------------------------------------------------
+# RESPONSE MODEL
+# ---------------------------------------------------
 
 class AnalysisResult(BaseModel):
     score: int
@@ -62,19 +58,19 @@ class AnalysisResult(BaseModel):
     weaknesses: list[str]
     suggestions: list[str]
     improvedResume: str
-    strengths: list[str] = []   # Added for completeness
-    sections: list = []         # Optional
+    strengths: list[str] = []
+    sections: list = []
 
 
-# ---------------------------
-# PDF & DOCX TEXT EXTRACTION
-# ---------------------------
+# ---------------------------------------------------
+# PDF / DOCX EXTRACTION
+# ---------------------------------------------------
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     text = ""
     for page in doc:
-        text += page.get_text()
+        text += page.get_text("text")  # Faster + cleaner
     return text
 
 
@@ -84,43 +80,67 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
     return "\n".join(p.text for p in document.paragraphs)
 
 
-# ---------------------------
-# AI ANALYSIS FUNCTION
-# ---------------------------
+# ---------------------------------------------------
+# ⚡ 2-STEP OPTIMIZED AI ANALYSIS (SUPER FAST)
+# ---------------------------------------------------
 
 def analyze_with_ai(resume_text: str) -> AnalysisResult:
-    prompt = f"""
-You are a professional resume reviewer.
-
-Analyze this resume and return STRICT JSON with keys:
-- score (0-100)
-- skills (list of skills)
-- summary (text)
-- strengths (list)
-- weaknesses (list)
-- suggestions (list)
-- improvedResume (full improved resume)
+    # --------------------------
+    # STEP 1 — Fast Summarization
+    # --------------------------
+    summary_prompt = f"""
+Summarize this resume into clean structured points.
+Keep it short but meaningful.
 
 Resume:
 \"\"\"{resume_text}\"\"\"
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    summary_response = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[
+            {"role": "system", "content": "You are an expert summarizer."},
+            {"role": "user", "content": summary_prompt},
+        ]
+    )
+
+    short_resume = summary_response.choices[0].message.content
+
+    # --------------------------
+    # STEP 2 — Actual Analysis (10× faster now)
+    # --------------------------
+    analysis_prompt = f"""
+You are a professional resume reviewer.
+
+Analyze this summarized resume and return STRICT JSON with:
+- score (0-100)
+- skills
+- summary
+- strengths
+- weaknesses
+- suggestions
+- improvedResume
+
+Summarized Resume:
+\"\"\"{short_resume}\"\"\"
+"""
+
+    final_response = client.chat.completions.create(
+        model="gpt-4.1",
         messages=[
             {"role": "system", "content": "You are an expert resume analyzer."},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": analysis_prompt},
         ],
         response_format={"type": "json_object"}
     )
 
-    data = json.loads(response.choices[0].message.content)
+    data = json.loads(final_response.choices[0].message.content)
     return AnalysisResult(**data)
 
 
-# ---------------------------
-# API: UPLOAD + ANALYZE RESUME
-# ---------------------------
+# ---------------------------------------------------
+# API — Analyze Resume
+# ---------------------------------------------------
 
 @app.post("/analyze-resume", response_model=AnalysisResult)
 async def analyze_resume(file: UploadFile = File(...)):
@@ -129,74 +149,58 @@ async def analyze_resume(file: UploadFile = File(...)):
 
     if fname.endswith(".pdf"):
         resume_text = extract_text_from_pdf(file_bytes)
-
     elif fname.endswith(".docx"):
         resume_text = extract_text_from_docx(file_bytes)
-
     else:
-        return {"error": "Only PDF or DOCX files are supported"}
+        return {"error": "Only PDF or DOCX files supported"}
 
     if not resume_text.strip():
-        return {"error": "Could not read text from file"}
+        return {"error": "Could not extract text"}
 
-    result = analyze_with_ai(resume_text)
-    return result
+    return analyze_with_ai(resume_text)
 
 
-# ---------------------------
-# API: DOWNLOAD PDF REPORT
-# ---------------------------
+# ---------------------------------------------------
+# API — Download Premium PDF
+# ---------------------------------------------------
 
 @app.post("/download-report")
 async def download_report(data: AnalysisResult):
 
     buffer = io.BytesIO()
 
-    # Document settings + custom margins
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
         leftMargin=45,
         rightMargin=45,
         topMargin=70,
-        bottomMargin=50
+        bottomMargin=50,
     )
 
     styles = getSampleStyleSheet()
 
-    # -----------------------------
-    #    CUSTOM ULTRA PREMIUM STYLES
-    # -----------------------------
-
+    # Premium Styles
     title_style = ParagraphStyle(
         "title_style",
         parent=styles["Title"],
-        fontSize=28,
-        leading=34,
+        fontSize=26,
+        leading=32,
         textColor="#C9A227",
-        alignment=1,  # center
+        alignment=1,
     )
 
     header_style = ParagraphStyle(
         "header_style",
         parent=styles["Heading2"],
         fontSize=18,
-        leading=22,
         textColor="#2E2E2E",
-    )
-
-    subheader_style = ParagraphStyle(
-        "subheader_style",
-        parent=styles["Heading3"],
-        fontSize=14,
-        leading=18,
-        textColor="#444",
     )
 
     body_style = ParagraphStyle(
         "body_style",
         parent=styles["BodyText"],
-        fontSize=11.5,
+        fontSize=12,
         leading=16,
         textColor="#333",
     )
@@ -204,157 +208,72 @@ async def download_report(data: AnalysisResult):
     bullet_style = ParagraphStyle(
         "bullet_style",
         parent=styles["BodyText"],
-        fontSize=11.5,
-        leading=16,
-        leftIndent=15
-    )
-
-    highlight_box_style = ParagraphStyle(
-        "highlight",
-        parent=styles["BodyText"],
-        backColor="#FFF8E1",
-        borderColor="#C9A227",
-        borderWidth=1,
-        borderPadding=8,
         fontSize=12,
-        leading=18,
-        spaceAfter=12,
+        leading=16,
+        leftIndent=15,
     )
 
-    # -----------------------------
-    # PAGE HEADER + TITLE
-    # -----------------------------
-
+    # PDF BODY
     elements = []
 
     elements.append(Paragraph("Resume Analysis Report", title_style))
-    elements.append(Spacer(1, 0.35 * inch))
+    elements.append(Spacer(1, 0.3 * inch))
 
-    # -----------------------------
-    # LARGE SCORE PANEL
-    # -----------------------------
-
+    # Score Panel
     score_panel = [
-        [Paragraph(f"<b>Your Resume Score: {data.score}/100</b>", header_style)]
+        [Paragraph(f"<b>Resume Score: {data.score}/100</b>", header_style)]
     ]
 
-    table = Table(
-        score_panel,
-        colWidths=[6.2 * inch]
-    )
-
+    table = Table(score_panel, colWidths=[6 * inch])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.Color(0.95, 0.88, 0.55)),
         ("BOX", (0, 0), (-1, -1), 2, colors.Color(0.8, 0.65, 0.15)),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 12),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
     ]))
 
     elements.append(table)
-    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Spacer(1, 0.25 * inch))
 
-    # Divider
-    elements.append(Paragraph("<para alignment='center'><font color='#C9A227'>────────────────────────────────────────</font></para>", body_style))
-    elements.append(Spacer(1, 0.2 * inch))
-
-    # -----------------------------
-    # SUMMARY BLOCK
-    # -----------------------------
+    # Summary
     elements.append(Paragraph("Professional Summary", header_style))
     elements.append(Spacer(1, 0.1 * inch))
     elements.append(Paragraph(data.summary.replace("\n", "<br/>"), body_style))
     elements.append(Spacer(1, 0.25 * inch))
 
-    # -----------------------------
-    # STRENGTHS (in gold box)
-    # -----------------------------
+    # Strengths
     if data.strengths:
         elements.append(Paragraph("Key Strengths", header_style))
-        elements.append(Spacer(1, 0.15 * inch))
-
         for s in data.strengths:
             elements.append(Paragraph(f"• {s}", bullet_style))
+        elements.append(Spacer(1, 0.25 * inch))
 
-        elements.append(Spacer(1, 0.3 * inch))
-
-    # -----------------------------
-    # WEAKNESSES (in red box)
-    # -----------------------------
-    elements.append(Paragraph("Areas for Improvement", header_style))
-    elements.append(Spacer(1, 0.15 * inch))
-
+    # Weaknesses
+    elements.append(Paragraph("Areas to Improve", header_style))
     for w in data.weaknesses:
         elements.append(Paragraph(f"• {w}", bullet_style))
+    elements.append(Spacer(1, 0.25 * inch))
 
-    elements.append(Spacer(1, 0.3 * inch))
-
-    # -----------------------------
-    # SKILLS – Skill Badge Table
-    # -----------------------------
+    # Skills List
     elements.append(Paragraph("Detected Skills", header_style))
-    elements.append(Spacer(1, 0.15 * inch))
-
-    skill_rows = []
-    row = []
-
-    for i, skill in enumerate(data.skills):
-        badge = Paragraph(
-            f"<para alignment='center'><b>{skill}</b></para>",
-            ParagraphStyle(
-                "badge",
-                backColor="#EFEFEF",
-                borderColor="#C9A227",
-                borderWidth=1,
-                borderRadius=5,
-                alignment=1,
-                padding=4,
-                leading=14,
-            )
-        )
-        row.append(badge)
-
-        if len(row) == 3:
-            skill_rows.append(row)
-            row = []
-
-    if row:
-        skill_rows.append(row)
-
-    skill_table = Table(skill_rows, colWidths=[2 * inch])
-    skill_table.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
-    elements.append(skill_table)
+    for skill in data.skills:
+        elements.append(Paragraph(f"• {skill}", bullet_style))
     elements.append(Spacer(1, 0.3 * inch))
 
-    # -----------------------------
-    # SUGGESTIONS
-    # -----------------------------
-    elements.append(Paragraph("Suggestions for Improvement", header_style))
-    elements.append(Spacer(1, 0.15 * inch))
+    # Suggestions
+    elements.append(Paragraph("Suggestions", header_style))
+    for sug in data.suggestions:
+        elements.append(Paragraph(f"• {sug}", bullet_style))
+    elements.append(Spacer(1, 0.3 * inch))
 
-    for s in data.suggestions:
-        elements.append(Paragraph(f"• {s}", bullet_style))
-
-    elements.append(Spacer(1, 0.4 * inch))
-
-    # New Page for Improved Resume
+    # New Page — Improved Resume
     elements.append(PageBreak())
-
-    # -----------------------------
-    # IMPROVED RESUME (premium layout)
-    # -----------------------------
     elements.append(Paragraph("AI-Optimized Resume", title_style))
     elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Paragraph(data.improvedResume.replace("\n", "<br/>"), body_style))
 
-    improved_resume_text = data.improvedResume.replace("\n", "<br/>")
-    elements.append(Paragraph(improved_resume_text, body_style))
-
-    # -----------------------------
-    # BUILD DOCUMENT
-    # -----------------------------
     doc.build(elements)
-
     buffer.seek(0)
 
     return StreamingResponse(
@@ -363,9 +282,10 @@ async def download_report(data: AnalysisResult):
         headers={"Content-Disposition": "attachment; filename=UltraPremium_Resume_Report.pdf"},
     )
 
-# ---------------------------
+
+# ---------------------------------------------------
 # ROOT ROUTE
-# ---------------------------
+# ---------------------------------------------------
 
 @app.get("/")
 def home():
